@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Project001coffeeshop" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenBackground">#050505</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_javagem</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#C67C4E</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">#F9F9F9</item>
+        <item name="android:colorAccent">#C67C4E</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">#F9F9F9</item>
+    </style>
+</resources>

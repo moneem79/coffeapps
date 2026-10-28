@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import com.example.project001coffeeshop.data.CoffeeCatalog
+import com.example.project001coffeeshop.model.AuthPage
+import com.example.project001coffeeshop.ui.AuthViewModel
 import com.example.project001coffeeshop.ui.CoffeeViewModel
 import com.example.project001coffeeshop.ui.components.BottomNavigation
 import com.example.project001coffeeshop.ui.components.Brand
@@ -29,9 +31,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val viewModel = ViewModelProvider(this)[CoffeeViewModel::class.java]
+        val authViewModel = ViewModelProvider(this)[AuthViewModel::class.java]
         setContent {
             Project001coffeeshopTheme {
-                JavaGemApp(viewModel) { darkHeader, lightNavigation ->
+                JavaGemApp(viewModel, authViewModel) { darkHeader, lightNavigation ->
                     val controller = WindowCompat.getInsetsController(window, window.decorView)
                     controller.isAppearanceLightStatusBars = !darkHeader
                     controller.isAppearanceLightNavigationBars = lightNavigation
@@ -42,15 +45,24 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun JavaGemApp(viewModel: CoffeeViewModel, onSystemBars: (Boolean, Boolean) -> Unit) {
+private fun JavaGemApp(viewModel: CoffeeViewModel, authViewModel: AuthViewModel, onSystemBars: (Boolean, Boolean) -> Unit) {
     val state by viewModel.state.collectAsState()
+    val auth by authViewModel.state.collectAsState()
+    // A stored shopping/onboarding flag must never bypass the entry flow.
+    val atAuth = auth.profile == null
     var route by rememberSaveable { mutableStateOf("home") }
     var detailReturn by rememberSaveable { mutableStateOf("home") }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbars = remember { SnackbarHostState() }
     LaunchedEffect(viewModel) { viewModel.events.collect { snackbars.showSnackbar(it, duration = SnackbarDuration.Short) } }
-    SideEffect { onSystemBars(!state.started || route == "home", state.started) }
-    BackHandler(state.started && route != "home") { route = if (route.startsWith("detail:")) detailReturn else "home" }
+    SideEffect { onSystemBars(!atAuth && route == "home", true) }
+    LaunchedEffect(atAuth) { if (atAuth) dialog = null }
+    fun authBack() {
+        if (auth.page != AuthPage.SIGN_IN) authViewModel.open(AuthPage.SIGN_IN)
+    }
+    BackHandler(if (atAuth) auth.page != AuthPage.SIGN_IN else route != "home") {
+        if (atAuth) authBack() else route = if (route.startsWith("detail:")) detailReturn else "home"
+    }
     fun openCoffee(id: String) { detailReturn = if (route == "favorites") "favorites" else "home"; route = "detail:$id" }
 
     Box(Modifier.fillMaxSize().background(CoffeeColors.Background), contentAlignment = Alignment.TopCenter) {
@@ -66,12 +78,19 @@ private fun JavaGemApp(viewModel: CoffeeViewModel, onSystemBars: (Boolean, Boole
                     SnackbarHost(snackbars, Modifier.navigationBarsPadding().padding(bottom = clearance))
                 },
                 bottomBar = {
-                    if (state.started && route in listOf("home", "favorites", "updates")) {
+                    if (!atAuth && route in listOf("home", "favorites", "updates")) {
                         BottomNavigation(route, state.cart.sumOf { it.quantity }) { route = it }
                     }
                 }) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)) {
-                    if (!state.started) WelcomeScreen { viewModel.start(); route = "home" }
+                    if (atAuth) AuthScreen(auth, ::authBack, authViewModel::open, authViewModel::name,
+                        authViewModel::email, authViewModel::password, authViewModel::confirm,
+                        onSubmit = {
+                            if (authViewModel.submit()) {
+                                viewModel.start(); route = "home"
+                                viewModel.message("Demo profile ready. No credentials were verified.")
+                            }
+                        })
                     else when {
                         route.startsWith("detail:") -> {
                             val coffee = CoffeeCatalog.find(route.substringAfter(":"))
@@ -91,7 +110,7 @@ private fun JavaGemApp(viewModel: CoffeeViewModel, onSystemBars: (Boolean, Boole
             }
         }
     }
-    if (dialog == "address" || dialog == "note") {
+    if (!atAuth && (dialog == "address" || dialog == "note")) {
         val isAddress = dialog == "address"
         var text by rememberSaveable(dialog) { mutableStateOf(if (isAddress) state.address else state.deliveryNote) }
         AlertDialog(onDismissRequest = { dialog = null }, title = { Text(if (isAddress) "Delivery address" else "A note for your order") },
@@ -105,7 +124,7 @@ private fun JavaGemApp(viewModel: CoffeeViewModel, onSystemBars: (Boolean, Boole
                 TextButton({ if (isAddress) viewModel.address(text) else viewModel.note(text); dialog = null }, enabled = !isAddress || text.isNotBlank()) { Text("Save") }
             }, dismissButton = { TextButton({ dialog = null }) { Text("Cancel") } })
     }
-    if (dialog == "offer") AlertDialog(onDismissRequest = { dialog = null }, title = { Text("Good coffee is better shared.") },
+    if (!atAuth && dialog == "offer") AlertDialog(onDismissRequest = { dialog = null }, title = { Text("Good coffee is better shared.") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             PromotionCard { }
             Text("Add any two coffees and the lower-priced one is on us. The offer repeats for each pair. Apply JAVAGEM in your bag.", style = MaterialTheme.typography.bodyMedium)
@@ -115,17 +134,21 @@ private fun JavaGemApp(viewModel: CoffeeViewModel, onSystemBars: (Boolean, Boole
                 Text(if (state.offerApplied) "Continue shopping" else "Apply JAVAGEM")
             }
         }, dismissButton = { TextButton({ dialog = null }) { Text("Maybe later") } })
-    if (dialog == "profile") AlertDialog(onDismissRequest = { dialog = null }, title = { Brand() }, text = {
+    if (!atAuth && dialog == "profile") AlertDialog(onDismissRequest = { dialog = null }, title = { Brand() }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Your little coffee corner", style = MaterialTheme.typography.titleLarge)
-            Text("You're browsing as a guest. Your bag and favorites stay on this device.", color = CoffeeColors.Muted, style = MaterialTheme.typography.bodyMedium)
+            Text(auth.profile?.name.orEmpty(), style = MaterialTheme.typography.titleLarge)
+            auth.profile?.let { profile ->
+                Text(profile.email, style = MaterialTheme.typography.bodyMedium)
+                Text("Demo profile · not authenticated", color = CoffeeColors.Copper, style = MaterialTheme.typography.bodySmall)
+            }
+            Text("This is a session-only profile preview. No real account is connected.", color = CoffeeColors.Muted, style = MaterialTheme.typography.bodyMedium)
             Text("${state.favorites.size} favorites · ${state.cart.sumOf { it.quantity }} coffees in your bag")
+            TextButton({ dialog = null; route = "home"; authViewModel.signOut() }) { Text("Sign out of demo") }
             TextButton({ dialog = "address" }) { Text("Edit delivery address") }
             TextButton({ dialog = null; route = "updates" }) { Text("View your latest demo order") }
-            TextButton({ dialog = null; route = "home"; viewModel.replayWelcome() }) { Text("Replay welcome screen") }
         }
     }, confirmButton = { TextButton({ dialog = null }) { Text("Lovely") } })
-    state.recoveryMessage?.let { message ->
+    state.recoveryMessage?.takeIf { !atAuth }?.let { message ->
         AlertDialog(onDismissRequest = viewModel::dismissRecovery, title = { Text("Welcome back") }, text = { Text(message) },
             confirmButton = { TextButton(viewModel::dismissRecovery) { Text("Continue") } })
     }

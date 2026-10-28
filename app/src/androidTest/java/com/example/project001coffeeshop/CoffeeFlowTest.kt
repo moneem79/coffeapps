@@ -17,7 +17,11 @@ class CoffeeFlowTest {
     }
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
 
-    private fun start() { compose.onNodeWithText("Get Started").performClick() }
+    private fun start() {
+        compose.onNodeWithTag("auth-email").performTextInput("coffee@example.com")
+        compose.onNodeWithTag("auth-password").performTextInput("sample123")
+        compose.onNodeWithText("Preview sign in").performScrollTo().performClick()
+    }
 
     @Test fun searchAndCategoryFiltersWork() {
         start()
